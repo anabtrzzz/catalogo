@@ -1,0 +1,125 @@
+import { useState, useEffect } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import type { User } from "@supabase/supabase-js";
+ 
+export function useAuth() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
+ 
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        const currentUser = session?.user ?? null;
+        setUser(currentUser);
+        if (currentUser) {
+          const { data } = await supabase.rpc("has_role", {
+            _user_id: currentUser.id,
+            _role: "admin",
+          });
+          setIsAdmin(data === true);
+        } else {
+          setIsAdmin(false);
+        }
+        setLoading(false);
+      }
+    );
+ 
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) {
+        const { data } = await supabase.rpc("has_role", {
+          _user_id: currentUser.id,
+          _role: "admin",
+        });
+        setIsAdmin(data === true);
+      }
+      setLoading(false);
+    });
+ 
+    return () => subscription.unsubscribe();
+  }, []);
+ 
+  const signIn = (email: string, password: string) =>
+    supabase.auth.signInWithPassword({ email, password });
+ 
+  const signOut = () => supabase.auth.signOut();
+ 
+  return { user, isAdmin, loading, signIn, signOut };
+}
+ 
+ 
+src/hooks/useProducts.ts
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+import type { Tables } from "@/integrations/supabase/types";
+ 
+type Product = Tables<"products">;
+ 
+export function useProducts() {
+  return useQuery({
+    queryKey: ["products"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data as Product[];
+    },
+  });
+}
+ 
+export function useProduct(id: string) {
+  return useQuery({
+    queryKey: ["products", id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (error) throw error;
+      return data as Product;
+    },
+    enabled: !!id,
+  });
+}
+ 
+export function useCreateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (product: Omit<Product, "id" | "created_at" | "updated_at">) => {
+      const { data, error } = await supabase.from("products").insert(product).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
+  });
+}
+ 
+export function useUpdateProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...product }: Partial<Product> & { id: string }) => {
+      const { data, error } = await supabase.from("products").update(product).eq("id", id).select().single();
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
+  });
+}
+ 
+export function useDeleteProduct() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("products").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["products"] }),
+  });
+}
+ 
+ 
